@@ -20,7 +20,7 @@ const int LIGHT_SENSOR_PIN = A0;
 const int SLEEP_INTERVAL_MIN = 15;
 
 // Thresholds for opening/closing the door. Adjust these to your sensor.
-const int LIGHT_THRESHOLD_CLOSE = 90;
+const int LIGHT_THRESHOLD_CLOSE = 75;
 const int LIGHT_THRESHOLD_OPEN = 100;
 
 // How long to run the motor (in milliseconds). Adjust to your door.
