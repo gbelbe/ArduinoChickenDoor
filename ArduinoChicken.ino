@@ -40,7 +40,7 @@ void setup() {
   delay(500); // Allow serial to initialize
 
   // Set pin modes
-  pinMode(LDR_ALIM_PIN, INPUT);
+  pinMode(LDR_ALIM_PIN, OUTPUT);
   pinMode(PWMA, OUTPUT);
   pinMode(DA, OUTPUT);
 
