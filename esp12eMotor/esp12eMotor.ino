@@ -1,14 +1,8 @@
 /*
-  ESP8266 Low-Power Motor Control for L298N Driver
+  ESP8266 Low-Power Motor Control for ESP-12E Motor Shield
 
-  L298N WIRING:
-  - L298N VCC/12V: Connect to your battery's positive terminal.
-  - L298N GND:      Connect to your battery's negative terminal AND a GND pin on the ESP8266.
-  - L298N OUT1/OUT2: Connect to the two terminals of your DC motor.
-
-  - ESP8266 D1: Connect to L298N ENA (Enable A for speed control).
-  - ESP8266 D3: Connect to L298N IN1 (Direction control 1).
-  - ESP8266 D4: Connect to L298N IN2 (Direction control 2).
+  This code is designed for a NodeMCU/ESP-12E board with a motor shield stacked on top.
+  It uses Motor A terminals for the chicken door motor.
 
   ** IMPORTANT HARDWARE MODIFICATION **
   You MUST connect the D0 (GPIO16) pin to the RST pin for deep sleep to work.
@@ -29,10 +23,11 @@
   const int SLEEP_INTERVAL_MIN = 15; // Sleep for 15 minutes in production
 #endif
 
-// Define motor control pins for L298N
-const int MOTOR_ENA = D1; // Speed control (PWM)
-const int MOTOR_IN1 = D3; // Direction control 1
-const int MOTOR_IN2 = D4; // Direction control 2
+// Define motor control pins for the ESP-12E Motor Shield (Motor A)
+const int MOTOR_PWM = D2;  // Speed control (PWM)
+const int MOTOR_AIN1 = D1; // Direction control 1
+const int MOTOR_AIN2 = D3; // Direction control 2
+const int MOTOR_STBY = D8; // Standby pin
 
 // Define the light sensor pin
 const int LDR_ALIM_PIN = D5;
@@ -56,15 +51,23 @@ void setup() {
     delay(500); // Allow serial to initialize
   #endif
 
- 
 
   SERIAL_PRINTLN("Waking up to run main logic...");
 
   // Set pin modes
   pinMode(LDR_ALIM_PIN, OUTPUT);
-  pinMode(MOTOR_ENA, OUTPUT);
-  pinMode(MOTOR_IN1, OUTPUT);
-  pinMode(MOTOR_IN2, OUTPUT);
+  pinMode(MOTOR_PWM, OUTPUT);
+  pinMode(MOTOR_AIN1, OUTPUT);
+  pinMode(MOTOR_AIN2, OUTPUT);
+  pinMode(MOTOR_STBY, OUTPUT);
+
+  // Ensure motor control pins are in a stopped state BEFORE enabling the driver
+  digitalWrite(MOTOR_AIN1, HIGH);
+  digitalWrite(MOTOR_AIN2, HIGH);
+  analogWrite(MOTOR_PWM, 0);
+
+  // Enable the motor driver from standby mode
+  digitalWrite(MOTOR_STBY, HIGH);
 
   //power up the LDR sensor
   digitalWrite(LDR_ALIM_PIN, HIGH);
@@ -77,10 +80,12 @@ void setup() {
       SERIAL_PRINTLN("Invalid RTC data detected. Resetting isDoorOpen to 0.");
       isDoorOpen = 0; // Default to closed if RTC data is invalid
     }
+    SERIAL_PRINT("RTC Memory Read: isDoorOpen = ");
+    SERIAL_PRINTLN(isDoorOpen);
   }
 
   // Ensure motor is stopped initially
-  stopMotor();
+  //stopMotor();
 
   // The main logic is now in setup(), as it runs once on each wake-up.
   runLogic();
@@ -100,19 +105,27 @@ void runLogic() {
   SERIAL_PRINT("Door is currently: ");
   SERIAL_PRINTLN(isDoorOpen == 1 ? "Open" : "Closed");
 
+  SERIAL_PRINT("Evaluating conditions: luminosite = ");
+  SERIAL_PRINT(luminosite);
+  SERIAL_PRINT(", isDoorOpen = ");
+  SERIAL_PRINTLN(isDoorOpen);
+
   // If it's dark and the door is open, close it.
   if (luminosite < LIGHT_THRESHOLD_CLOSE && isDoorOpen == 1) {
+    SERIAL_PRINTLN("Condition 1 (Close) met.");
     SERIAL_PRINTLN("Closing door...");
     closeDoor();
     isDoorOpen = 0; // Update state
   }
   // If it's light and the door is closed, open it.
   else if (luminosite > LIGHT_THRESHOLD_OPEN && isDoorOpen == 0) {
+    SERIAL_PRINTLN("Condition 2 (Open) met.");
     SERIAL_PRINTLN("Opening door...");
     openDoor();
     isDoorOpen = 1; // Update state
   } else {
-    SERIAL_PRINTLN("No change needed.");
+      // This is a truly normal state (e.g., dark and door is closed, or light and door is open).
+      SERIAL_PRINTLN("No change needed."); 
   }
 
   // Go to sleep to save power
@@ -121,36 +134,39 @@ void runLogic() {
 
 void openDoor() {
   SERIAL_PRINTLN("Motor moving to OPEN state");
-  // Set direction for opening (e.g., IN1=HIGH, IN2=LOW)
-  digitalWrite(MOTOR_IN1, HIGH);
-  digitalWrite(MOTOR_IN2, LOW);
-  // Set motor to full speed
-  analogWrite(MOTOR_ENA, 255);
+  // Set direction for opening (e.g., AIN1=HIGH, AIN2=LOW)
+  digitalWrite(MOTOR_AIN1, HIGH);
+  digitalWrite(MOTOR_AIN2, LOW);
+  // Set motor to full speed (ESP8266 PWM range is 0-1023)
+  analogWrite(MOTOR_PWM, 1023);
   delay(MOTOR_RUN_TIME_OPEN); // Run motor for specified time
-  stopMotor();
+  //stopMotor();
 }
 
 void closeDoor() {
   SERIAL_PRINTLN("Motor moving to CLOSE state");
-  // Set direction for closing (e.g., IN1=LOW, IN2=HIGH)
-  digitalWrite(MOTOR_IN1, LOW);
-  digitalWrite(MOTOR_IN2, HIGH);
-  // Set motor to full speed
-  analogWrite(MOTOR_ENA, 255);
+  // Set direction for closing (e.g., AIN1=LOW, AIN2=HIGH)
+  digitalWrite(MOTOR_AIN1, LOW);
+  digitalWrite(MOTOR_AIN2, HIGH);
+  // Set motor to full speed (ESP8266 PWM range is 0-1023)
+  analogWrite(MOTOR_PWM, 1023);
   delay(MOTOR_RUN_TIME_CLOSE); // Run motor for specified time
-  stopMotor();
+  //stopMotor();
 }
 
 void stopMotor() {
-  SERIAL_PRINTLN("Stopping motor.");
-  // Disable the motor driver to stop the motor
-  analogWrite(MOTOR_ENA, 0);
-  // Set direction pins to low as a safe default state
-  digitalWrite(MOTOR_IN1, LOW);
-  digitalWrite(MOTOR_IN2, LOW);
+  SERIAL_PRINTLN("Stopping motor (brake).");
+  // Set both direction pins HIGH for brake mode on the TB6612FNG
+  digitalWrite(MOTOR_AIN1, HIGH);
+  digitalWrite(MOTOR_AIN2, HIGH);
+  // Set speed to 0
+  analogWrite(MOTOR_PWM, 0);
 }
 
 void goToSleep() {
+  // IMPORTANT: Put motor driver in standby to save power before sleeping
+  digitalWrite(MOTOR_STBY, LOW);
+
   // Save the current door state to RTC memory before sleeping
   uint32_t rtcData = isDoorOpen;
   ESP.rtcUserMemoryWrite(0, &rtcData, sizeof(rtcData));
